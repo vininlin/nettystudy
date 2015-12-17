@@ -47,6 +47,8 @@ final class DefaultChannelPipeline implements ChannelPipeline {
 
     static final InternalLogger logger = InternalLoggerFactory.getInstance(DefaultChannelPipeline.class);
 
+    //Handler类型为key,name为value的WeakHashMap
+    //Handler被JVM回收后，WeakHashMap中会失去
     @SuppressWarnings("unchecked")
     private static final WeakHashMap<Class<?>, String>[] nameCaches =
             new WeakHashMap[Runtime.getRuntime().availableProcessors()];
@@ -58,10 +60,11 @@ final class DefaultChannelPipeline implements ChannelPipeline {
     }
 
     final AbstractChannel channel;
-
+    //headContext
     final AbstractChannelHandlerContext head;
+    //tailContext
     final AbstractChannelHandlerContext tail;
-
+    //使用HashMap保存name与Context的关系
     private final Map<String, AbstractChannelHandlerContext> name2ctx =
             new HashMap<String, AbstractChannelHandlerContext>(4);
 
@@ -75,10 +78,10 @@ final class DefaultChannelPipeline implements ChannelPipeline {
             throw new NullPointerException("channel");
         }
         this.channel = channel;
-
+        
         tail = new TailContext(this);
         head = new HeadContext(this);
-
+        //初始化时首尾相等
         head.next = tail;
         tail.prev = head;
     }
@@ -132,6 +135,7 @@ final class DefaultChannelPipeline implements ChannelPipeline {
 
     @Override
     public ChannelPipeline addLast(EventExecutorGroup group, String name, ChannelHandler handler) {
+        //同步，因为name2ctx对应的HashMap非线程安全
         synchronized (this) {
             name = filterName(name, handler);
             addLast0(name, new DefaultChannelHandlerContext(this, findInvoker(group), name, handler));
@@ -150,13 +154,14 @@ final class DefaultChannelPipeline implements ChannelPipeline {
 
     private void addLast0(final String name, AbstractChannelHandlerContext newCtx) {
         checkMultiplicity(newCtx);
-
+        //获取尾部HandlerContext对应的上一个HandlerContext
         AbstractChannelHandlerContext prev = tail.prev;
+        //把新的Context插入到TailContext之前
         newCtx.prev = prev;
         newCtx.next = tail;
         prev.next = newCtx;
         tail.prev = newCtx;
-
+        //保存在缓冲中。
         name2ctx.put(name, newCtx);
 
         callHandlerAdded(newCtx);
@@ -571,10 +576,11 @@ final class DefaultChannelPipeline implements ChannelPipeline {
     }
 
     private void callHandlerAdded(final AbstractChannelHandlerContext ctx) {
+        //如果ChannelHandlerContext的skipFlags标识中忽略了handlerAdded方法，则返回
         if ((ctx.skipFlags & AbstractChannelHandlerContext.MASK_HANDLER_ADDED) != 0) {
             return;
         }
-
+       //Channel已经注册且当前执行线程非EventLoop线程，则异步执行
         if (ctx.channel().isRegistered() && !ctx.executor().inEventLoop()) {
             ctx.executor().execute(new Runnable() {
                 @Override
@@ -584,12 +590,14 @@ final class DefaultChannelPipeline implements ChannelPipeline {
             });
             return;
         }
+        //同步执行
         callHandlerAdded0(ctx);
     }
 
     private void callHandlerAdded0(final AbstractChannelHandlerContext ctx) {
         try {
             ctx.invokedThisChannelRead = false;
+            //触发ChannelHandler的handlerAdded方法
             ctx.handler().handlerAdded(ctx);
         } catch (Throwable t) {
             boolean removed = false;
@@ -1064,6 +1072,7 @@ final class DefaultChannelPipeline implements ChannelPipeline {
         return tail.writeAndFlush(msg);
     }
 
+    //验证Handler名字是否合法
     private String filterName(String name, ChannelHandler handler) {
         if (name == null) {
             return generateName(handler);
@@ -1104,6 +1113,7 @@ final class DefaultChannelPipeline implements ChannelPipeline {
     }
 
     static final class TailContext extends AbstractChannelHandlerContext implements ChannelHandler {
+        //全部忽略outbound方法
         private static final int SKIP_FLAGS = skipFlags0(TailContext.class);
         private static final String TAIL_NAME = generateName0(TailContext.class);
 
@@ -1215,6 +1225,7 @@ final class DefaultChannelPipeline implements ChannelPipeline {
     }
 
     static final class HeadContext extends AbstractChannelHandlerContext implements ChannelHandler {
+        //全部忽略inbound的方法
         private static final int SKIP_FLAGS = skipFlags0(HeadContext.class);
         private static final String HEAD_NAME = generateName0(HeadContext.class);
 

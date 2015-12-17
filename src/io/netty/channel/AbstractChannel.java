@@ -464,10 +464,14 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             if (promise == null) {
                 throw new NullPointerException("promise");
             }
+            //调用外部AbstractChannel类的isRegistered方法
+            //如果已经注册，在ChannelPromise中设置异常
             if (isRegistered()) {
                 promise.setFailure(new IllegalStateException("registered to an event loop already"));
                 return;
             }
+            ////调用外部AbstractChannel类的isCompatible方法判断eventLoop是否兼容
+            //不兼容在ChannelPromise设置异常
             if (!isCompatible(eventLoop)) {
                 promise.setFailure(
                         new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
@@ -481,10 +485,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             } else {
                 AbstractChannel.this.eventLoop.unwrapped = eventLoop;
             }
-
+            //是否为同一eventLoop线程，如果是则调用register0方法注册
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
+                //非同一eventLoop执行一次性任务注册
                 try {
                     eventLoop.execute(new OneTimeTask() {
                         @Override
@@ -510,15 +515,22 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 if (!promise.setUncancellable() || !ensureOpen(promise)) {
                     return;
                 }
+                //设置第一次注册标识
                 boolean firstRegistration = neverRegistered;
+                //调用外部AbstractChannel类的doRegister()执行注册
                 doRegister();
+                //成功后设置标识位
                 neverRegistered = false;
                 registered = true;
+                //eventLoop继续接收新任务
                 eventLoop.acceptNewTasks();
+                //设置成功结果
                 safeSetSuccess(promise);
+                //ChannelPipeline触发已经注册事件
                 pipeline.fireChannelRegistered();
                 // Only fire a channelActive if the channel has never been registered. This prevents firing
                 // multiple channel actives if the channel is deregistered and re-registered.
+                //如果是第一次注册并且Channel已经激活，ChannelPipeline触发ChannelActive事件。
                 if (firstRegistration && isActive()) {
                     pipeline.fireChannelActive();
                 }
@@ -532,6 +544,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         @Override
         public final void bind(final SocketAddress localAddress, final ChannelPromise promise) {
+            //如果promise设置了取消或Channel没打开，直接返回
             if (!promise.setUncancellable() || !ensureOpen(promise)) {
                 return;
             }
@@ -548,16 +561,18 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                         "is not bound to a wildcard address; binding to a non-wildcard " +
                         "address (" + localAddress + ") anyway as requested.");
             }
-
+            //判断Channel是否已经激活
             boolean wasActive = isActive();
             try {
+                //调用外部AbstractChannel的doBind()方法
                 doBind(localAddress);
             } catch (Throwable t) {
                 safeSetFailure(promise, t);
                 closeIfClosed();
                 return;
             }
-
+            //如果此时Channel现在已经激活
+            //则启动单次任务触发ChannelPipeline的ChannelActive事件。
             if (!wasActive && isActive()) {
                 invokeLater(new OneTimeTask() {
                     @Override
@@ -566,25 +581,27 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     }
                 });
             }
-
+            //设置结果成功
             safeSetSuccess(promise);
         }
 
         @Override
         public final void disconnect(final ChannelPromise promise) {
+            //ChannelPromise是否已经取消
             if (!promise.setUncancellable()) {
                 return;
             }
 
             boolean wasActive = isActive();
             try {
+              //调用外部AbstractChannel的doDisconnect()方法
                 doDisconnect();
             } catch (Throwable t) {
                 safeSetFailure(promise, t);
                 closeIfClosed();
                 return;
             }
-
+            //如果Channel上面已经激活现在处理非激活状态，则触发ChannelInactive事件。
             if (wasActive && !isActive()) {
                 invokeLater(new OneTimeTask() {
                     @Override
@@ -600,10 +617,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         @Override
         public final void close(final ChannelPromise promise) {
+            //ChannelPromise已经设置取消，则返回
             if (!promise.setUncancellable()) {
                 return;
             }
-
+            //如果正在flush认操作，则设置任务来close
             if (inFlush0) {
                 invokeLater(new OneTimeTask() {
                     @Override
@@ -613,7 +631,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 });
                 return;
             }
-
+            //outboundBuffer为null,closeFuture添加关闭监听器
             if (outboundBuffer == null) {
                 // This means close() was called before so we just register a listener and return
                 closeFuture.addListener(new ChannelFutureListener() {
@@ -630,7 +648,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 safeSetSuccess(promise);
                 return;
             }
-
+            //处理ChannelOutboundBuffer
             final boolean wasActive = isActive();
             final ChannelOutboundBuffer buffer = outboundBuffer;
             outboundBuffer = null; // Disallow adding any messages and flushes to outboundBuffer.
@@ -768,6 +786,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         @Override
         public final void write(Object msg, ChannelPromise promise) {
             ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            //outboundBuffer为null,则Channel关闭，设置失败结果和释放引用计数
             if (outboundBuffer == null) {
                 // If the outboundBuffer is null we know the channel was closed and so
                 // need to fail the future right away. If it is not null the handling of the rest
@@ -781,7 +800,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
             int size;
             try {
+                //过滤消息
                 msg = filterOutboundMessage(msg);
+                //预估消息大小
                 size = estimatorHandle().size(msg);
                 if (size < 0) {
                     size = 0;
@@ -791,35 +812,38 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 ReferenceCountUtil.release(msg);
                 return;
             }
-
+            //添加到ChannelOutboundBuffer中
             outboundBuffer.addMessage(msg, size, promise);
         }
 
         @Override
         public final void flush() {
             ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            //outboundBuffer为空则返回
             if (outboundBuffer == null) {
                 return;
             }
-
+            //修改ChannelOutboundBuffer环形数组的tail指针
             outboundBuffer.addFlush();
             flush0();
         }
 
         protected void flush0() {
+            //正在flush中，返回
             if (inFlush0) {
                 // Avoid re-entrance
                 return;
             }
-
+            //ChannelOutboundBuffer为空，返回
             final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
             if (outboundBuffer == null || outboundBuffer.isEmpty()) {
                 return;
             }
-
+            
             inFlush0 = true;
 
             // Mark all pending write requests as failure if the channel is inactive.
+            //Channel不在激活状态，则设置flush失败
             if (!isActive()) {
                 try {
                     if (isOpen()) {
@@ -834,6 +858,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             try {
+                //调用外部AbstractChannel类的doWrite方法写数据
                 doWrite(outboundBuffer);
             } catch (Throwable t) {
                 outboundBuffer.failFlushed(t);

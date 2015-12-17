@@ -77,6 +77,7 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
         @Override
         public ByteBuf cumulate(ByteBufAllocator alloc, ByteBuf cumulation, ByteBuf in) {
             ByteBuf buffer;
+            //不够则扩容
             if (cumulation.writerIndex() > cumulation.maxCapacity() - in.readableBytes()
                     || cumulation.refCnt() > 1) {
                 // Expand cumulation (by replace it) when either there is not more room in the buffer
@@ -225,8 +226,10 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
                 if (first) {
                     cumulation = data;
                 } else {
+                    //把读入的字节累积到cumulation中
                     cumulation = cumulator.cumulate(ctx.alloc(), cumulation, data);
                 }
+                //调用解码的方法
                 callDecode(ctx, cumulation, out);
             } catch (DecoderException e) {
                 throw e;
@@ -310,9 +313,12 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
      */
     protected void callDecode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
         try {
+            //循环解码
             while (in.isReadable()) {
+                //
                 int outSize = out.size();
                 int oldInputLength = in.readableBytes();
+                //调用子类解码
                 decode(ctx, in, out);
 
                 // Check if this handler was removed before continuing the loop.
@@ -322,21 +328,23 @@ public abstract class ByteToMessageDecoder extends ChannelHandlerAdapter {
                 if (ctx.isRemoved()) {
                     break;
                 }
-
+                //outSize长度没有变化，说明解码不成功
                 if (outSize == out.size()) {
+                    //如果用户解码器没有消耗buf,说明是半包信息，需要由IO线程继续读取后面的信息
                     if (oldInputLength == in.readableBytes()) {
                         break;
                     } else {
+                        //如果用户解码器消耗了buf,则继续循环
                         continue;
                     }
                 }
-
+                //如果还是没有消耗buf,则抛出异常
                 if (oldInputLength == in.readableBytes()) {
                     throw new DecoderException(
                             StringUtil.simpleClassName(getClass()) +
                             ".decode() did not read anything but decoded a message.");
                 }
-
+                //如果是单条消息解码，完成后退出
                 if (isSingleDecode()) {
                     break;
                 }

@@ -80,17 +80,22 @@ public abstract class MessageToMessageDecoder<I> extends ChannelHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        //创建一个可循环利用的ArrayList
         RecyclableArrayList out = RecyclableArrayList.newInstance();
         try {
+            //检验是否是可接收类型
             if (acceptInboundMessage(msg)) {
                 @SuppressWarnings("unchecked")
                 I cast = (I) msg;
                 try {
+                    //调用子类解码
                     decode(ctx, cast, out);
                 } finally {
+                    //释放对象
                     ReferenceCountUtil.release(cast);
                 }
             } else {
+                //如果不是当前要接收的类型，加入out列表
                 out.add(msg);
             }
         } catch (DecoderException e) {
@@ -99,6 +104,7 @@ public abstract class MessageToMessageDecoder<I> extends ChannelHandlerAdapter {
             throw new DecoderException(e);
         } finally {
             int size = out.size();
+            //触发后面的Handler处理ChannelRead
             for (int i = 0; i < size; i ++) {
                 ctx.fireChannelRead(out.get(i));
             }

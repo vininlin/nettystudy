@@ -125,14 +125,15 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         } catch (IOException e) {
             throw new ChannelException("failed to open a new selector", e);
         }
-
+        //不启用keyset优化，直接返回
         if (DISABLE_KEYSET_OPTIMIZATION) {
             return selector;
         }
 
         try {
             SelectedSelectionKeySet selectedKeySet = new SelectedSelectionKeySet();
-
+            //启动优化选项，通过反射API把sun.nio.ch.SelectorImpl中对应的selectedKeys
+            //和publicSelectedKeys两个字段替换为Netty的SelectedSelectionKeySet
             Class<?> selectorImplClass =
                     Class.forName("sun.nio.ch.SelectorImpl", false, PlatformDependent.getSystemClassLoader());
 
@@ -220,6 +221,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
      * around the infamous epoll 100% CPU bug.
      */
     public void rebuildSelector() {
+        //非EventLoop线程rebuild,异常执行
         if (!inEventLoop()) {
             execute(new Runnable() {
                 @Override
@@ -238,6 +240,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
 
         try {
+            //创建新的selector
             newSelector = openSelector();
         } catch (Exception e) {
             logger.warn("Failed to create a new Selector.", e);
@@ -245,6 +248,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
 
         // Register all channels to the new Selector.
+        //把所有channel注册到新的selector
         int nChannels = 0;
         for (;;) {
             try {
@@ -282,7 +286,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
             break;
         }
-
+        //指向新的selector
         selector = newSelector;
 
         try {
@@ -299,8 +303,10 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
     @Override
     protected void run() {
+        //把wakenUp还原为false，并将之前的wakenUp状态保存在oldWakenUp变量中
         boolean oldWakenUp = wakenUp.getAndSet(false);
         try {
+            //如果队列中有任务，马上执行select操作
             if (hasTasks()) {
                 selectNow();
             } else {
@@ -333,7 +339,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 // It is inefficient in that it wakes up the selector for both
                 // the first case (BAD - wake-up required) and the second case
                 // (OK - no wake-up required).
-
+                //如果需要wakenUp则执行
                 if (wakenUp.get()) {
                     selector.wakeup();
                 }
@@ -381,6 +387,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     }
 
     private void processSelectedKeys() {
+        //如果selectedKeys!=null,说明是有优化的keySet,否则是原来的keySet
         if (selectedKeys != null) {
             processSelectedKeysOptimized(selectedKeys.flip());
         } else {
@@ -400,6 +407,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     void cancel(SelectionKey key) {
         key.cancel();
         cancelledKeys ++;
+        //取消的key数组大于设置的阈值时，设置重新select标识
         if (cancelledKeys >= CLEANUP_INTERVAL) {
             cancelledKeys = 0;
             needsToSelectAgain = true;
@@ -456,21 +464,26 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     }
 
     private void processSelectedKeysOptimized(SelectionKey[] selectedKeys) {
+        //循环处理有优化的keySet
         for (int i = 0;; i ++) {
             final SelectionKey k = selectedKeys[i];
+            //只要有k为null,就跳出循环
             if (k == null) {
                 break;
             }
             // null out entry in the array to allow to have it GC'ed once the Channel close
             // See https://github.com/netty/netty/issues/2363
+            //GC回收
             selectedKeys[i] = null;
-
+            
             final Object a = k.attachment();
-
+            
             if (a instanceof AbstractNioChannel) {
+                //如果是Channel
                 processSelectedKey(k, (AbstractNioChannel) a);
             } else {
                 @SuppressWarnings("unchecked")
+                //否则为NioTask
                 NioTask<SelectableChannel> task = (NioTask<SelectableChannel>) a;
                 processSelectedKey(k, task);
             }
@@ -492,6 +505,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 // to start over again.
                 //
                 // See https://github.com/netty/netty/issues/1523
+                //换一个set数组
                 selectedKeys = this.selectedKeys.flip();
                 i = -1;
             }
@@ -499,7 +513,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     }
 
     private static void processSelectedKey(SelectionKey k, AbstractNioChannel ch) {
+        //获取Unsafe类
         final AbstractNioChannel.NioUnsafe unsafe = ch.unsafe();
+        //非法的key,关闭
         if (!k.isValid()) {
             // close the channel if the key is not valid anymore
             unsafe.close(unsafe.voidPromise());
@@ -507,9 +523,11 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
 
         try {
+            //获取key上的操作
             int readyOps = k.readyOps();
             // Also check for readOps of 0 to workaround possible JDK bug which may otherwise lead
             // to a spin loop
+            //读操作
             if ((readyOps & (SelectionKey.OP_READ | SelectionKey.OP_ACCEPT)) != 0 || readyOps == 0) {
                 unsafe.read();
                 if (!ch.isOpen()) {
@@ -517,10 +535,12 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     return;
                 }
             }
+            //写操作
             if ((readyOps & SelectionKey.OP_WRITE) != 0) {
                 // Call forceFlush which will also take care of clear the OP_WRITE once there is nothing left to write
                 ch.unsafe().forceFlush();
             }
+            //connect
             if ((readyOps & SelectionKey.OP_CONNECT) != 0) {
                 // remove OP_CONNECT as otherwise Selector.select(..) will always return without blocking
                 // See https://github.com/netty/netty/issues/924
@@ -538,6 +558,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     private static void processSelectedKey(SelectionKey k, NioTask<SelectableChannel> task) {
         int state = 0;
         try {
+            //异步任务处理
             task.channelReady(k.channel(), k);
             state = 1;
         } catch (Exception e) {
@@ -609,11 +630,16 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     private void select(boolean oldWakenUp) throws IOException {
         Selector selector = this.selector;
         try {
+            //select的次数
             int selectCnt = 0;
+            //当前的纳秒数
             long currentTimeNanos = System.nanoTime();
+            //计算下一个要触发定时任务的剩余超时时间
             long selectDeadLineNanos = currentTimeNanos + delayNanos(currentTimeNanos);
             for (;;) {
+                //超时时间，增加0.5毫秒的调整值
                 long timeoutMillis = (selectDeadLineNanos - currentTimeNanos + 500000L) / 1000000L;
+                //马上执行select操作并退出循环
                 if (timeoutMillis <= 0) {
                     if (selectCnt == 0) {
                         selector.selectNow();
@@ -621,10 +647,14 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     }
                     break;
                 }
-
+                //带超时时间的select
                 int selectedKeys = selector.select(timeoutMillis);
                 selectCnt ++;
-
+                //满足以下条件 的任一种都退出循环
+                //1、存在selectedKeys；
+                //2、需要wakenUp;
+                //3、任务队列有任务
+                //4、一个计划任务准备执行
                 if (selectedKeys != 0 || oldWakenUp || wakenUp.get() || hasTasks() || hasScheduledTasks()) {
                     // - Selected something,
                     // - waken up by user, or
@@ -632,6 +662,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     // - a scheduled task is ready for processing
                     break;
                 }
+                //线程中断也退出
                 if (Thread.interrupted()) {
                     // Thread was interrupted so reset selected keys and break so we not run into a busy loop.
                     // As this is most likely a bug in the handler of the user or it's client library we will
@@ -646,19 +677,21 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     selectCnt = 1;
                     break;
                 }
-
+                
                 long time = System.nanoTime();
                 if (time - TimeUnit.MILLISECONDS.toNanos(timeoutMillis) >= currentTimeNanos) {
                     // timeoutMillis elapsed without anything selected.
+                    //没有selected,空循环，计数
                     selectCnt = 1;
                 } else if (SELECTOR_AUTO_REBUILD_THRESHOLD > 0 &&
                         selectCnt >= SELECTOR_AUTO_REBUILD_THRESHOLD) {
                     // The selector returned prematurely many times in a row.
                     // Rebuild the selector to work around the problem.
+                    //空循环达到或超出指定的次数后，需要重建selector
                     logger.warn(
                             "Selector.select() returned prematurely {} times in a row; rebuilding selector.",
                             selectCnt);
-
+                    //重建selector
                     rebuildSelector();
                     selector = this.selector;
 

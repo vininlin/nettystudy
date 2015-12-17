@@ -172,17 +172,22 @@ public abstract class AbstractByteBuf extends ByteBuf {
 
     @Override
     public ByteBuf discardReadBytes() {
+        //检验缓冲区是否可以访问
         ensureAccessible();
+        //readerIndex,没有可以丢弃的已读字节
         if (readerIndex == 0) {
             return this;
         }
-
+        //有可以丢弃的字节
         if (readerIndex != writerIndex) {
+            //将未读取的字节复制到缓冲区的起始位置 ，并调整writerIndex位置 
             setBytes(0, this, readerIndex, writerIndex - readerIndex);
             writerIndex -= readerIndex;
+            //调整mark的读写位置
             adjustMarkers(readerIndex);
             readerIndex = 0;
         } else {
+            //没有需要丢弃的字节
             adjustMarkers(readerIndex);
             writerIndex = readerIndex = 0;
         }
@@ -233,11 +238,11 @@ public abstract class AbstractByteBuf extends ByteBuf {
             throw new IllegalArgumentException(String.format(
                     "minWritableBytes: %d (expected: >= 0)", minWritableBytes));
         }
-
+        //满足写入条件
         if (minWritableBytes <= writableBytes()) {
             return this;
         }
-
+        //写入的字节大于动态扩容的最大字节，抛出异常
         if (minWritableBytes > maxCapacity - writerIndex) {
             throw new IndexOutOfBoundsException(String.format(
                     "writerIndex(%d) + minWritableBytes(%d) exceeds maxCapacity(%d): %s",
@@ -245,9 +250,11 @@ public abstract class AbstractByteBuf extends ByteBuf {
         }
 
         // Normalize the current capacity to the power of 2.
+        //扩容2倍
         int newCapacity = alloc().calculateNewCapacity(writerIndex + minWritableBytes, maxCapacity);
 
         // Adjust to the new capacity.
+        //调整成新的容量
         capacity(newCapacity);
         return this;
     }
@@ -645,8 +652,11 @@ public abstract class AbstractByteBuf extends ByteBuf {
 
     @Override
     public ByteBuf readBytes(byte[] dst, int dstIndex, int length) {
+        //检验可读空间
         checkReadableBytes(length);
+        //从当前readerIndex开始到目标dstIndex，复制length个字节到目标byte数组中
         getBytes(readerIndex, dst, dstIndex, length);
+        //readerIndex增加length个字节长度。
         readerIndex += length;
         return this;
     }
@@ -676,8 +686,11 @@ public abstract class AbstractByteBuf extends ByteBuf {
 
     @Override
     public ByteBuf readBytes(ByteBuf dst, int dstIndex, int length) {
+        //检验可读空间
         checkReadableBytes(length);
+        //从当前readerIndex开始到目标dstIndex，复制length个字节到目标byte数组中
         getBytes(readerIndex, dst, dstIndex, length);
+        //readerIndex增加length个字节长度。
         readerIndex += length;
         return this;
     }
@@ -785,9 +798,13 @@ public abstract class AbstractByteBuf extends ByteBuf {
 
     @Override
     public ByteBuf writeBytes(byte[] src, int srcIndex, int length) {
+        //检验是否完全释放
         ensureAccessible();
+        //检验缓冲区是否可写
         ensureWritable(length);
+        //从byte数组src复制缓冲中
         setBytes(writerIndex, src, srcIndex, length);
+        //writerIndex增加length个长度
         writerIndex += length;
         return this;
     }
@@ -1130,10 +1147,12 @@ public abstract class AbstractByteBuf extends ByteBuf {
      * than the specified value.
      */
     protected final void checkReadableBytes(int minimumReadableBytes) {
+        //检查缓冲区是否已经释放
         ensureAccessible();
         if (minimumReadableBytes < 0) {
             throw new IllegalArgumentException("minimumReadableBytes: " + minimumReadableBytes + " (expected: >= 0)");
         }
+        //readerIndex+要读的字节已经大于writerIndex
         if (readerIndex > writerIndex - minimumReadableBytes) {
             throw new IndexOutOfBoundsException(String.format(
                     "readerIndex(%d) + length(%d) exceeds writerIndex(%d): %s",

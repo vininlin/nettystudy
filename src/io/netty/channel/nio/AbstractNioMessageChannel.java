@@ -128,10 +128,12 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
     @Override
     protected void doWrite(ChannelOutboundBuffer in) throws Exception {
         final SelectionKey key = selectionKey();
+        //获取SelectionKey的interestOps
         final int interestOps = key.interestOps();
-
+        //自旋
         for (;;) {
             Object msg = in.current();
+            //所有消息已经写完，设置写标识位
             if (msg == null) {
                 // Wrote all messages.
                 if ((interestOps & SelectionKey.OP_WRITE) != 0) {
@@ -152,6 +154,7 @@ public abstract class AbstractNioMessageChannel extends AbstractNioChannel {
                     in.remove();
                 } else {
                     // Did not write all messages.
+                    //消息没写完则设置OP_WRITE标识，继续由多路复用器轮询channel写
                     if ((interestOps & SelectionKey.OP_WRITE) == 0) {
                         key.interestOps(interestOps | SelectionKey.OP_WRITE);
                     }

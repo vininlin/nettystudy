@@ -104,26 +104,37 @@ public class UnpooledHeapByteBuf extends AbstractReferenceCountedByteBuf {
 
     @Override
     public ByteBuf capacity(int newCapacity) {
+        //是否可以访问
         ensureAccessible();
         if (newCapacity < 0 || newCapacity > maxCapacity()) {
             throw new IllegalArgumentException("newCapacity: " + newCapacity);
         }
 
         int oldCapacity = array.length;
+        //新缓冲区长度大于旧的长度
         if (newCapacity > oldCapacity) {
+            //创建一个新的byte数组，把旧的数据复制到新的byte数组中。
             byte[] newArray = new byte[newCapacity];
             System.arraycopy(array, 0, newArray, 0, array.length);
+            //设置array引用指用新的数组
             setArray(newArray);
         } else if (newCapacity < oldCapacity) {
+            //创建新的子缓冲区
             byte[] newArray = new byte[newCapacity];
+            //获取readerIndex
             int readerIndex = readerIndex();
+            //如果readerIndex < newCapacity
             if (readerIndex < newCapacity) {
+                //获取写writerIndex
                 int writerIndex = writerIndex();
+                //调整writerIndex的位置
                 if (writerIndex > newCapacity) {
                     writerIndex(writerIndex = newCapacity);
                 }
+                //从readerIndex开始复制，到新的数据中，复制的长度是writerIndex - readerIndex
                 System.arraycopy(array, readerIndex, newArray, readerIndex, writerIndex - readerIndex);
             } else {
+                //设置读写index都为newCapacity的值
                 setIndex(newCapacity, newCapacity);
             }
             setArray(newArray);

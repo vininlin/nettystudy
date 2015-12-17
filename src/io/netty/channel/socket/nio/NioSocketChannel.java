@@ -199,19 +199,23 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
     @Override
     protected boolean doConnect(SocketAddress remoteAddress, SocketAddress localAddress) throws Exception {
+        //绑定本地地址
         if (localAddress != null) {
             javaChannel().socket().bind(localAddress);
         }
 
         boolean success = false;
         try {
+            //发起连接操作
             boolean connected = javaChannel().connect(remoteAddress);
+            //连接失败则设置OP_CONNECT标识位
             if (!connected) {
                 selectionKey().interestOps(SelectionKey.OP_CONNECT);
             }
             success = true;
             return connected;
         } finally {
+            //连接失败，关闭Channel
             if (!success) {
                 doClose();
             }
@@ -256,6 +260,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
     protected void doWrite(ChannelOutboundBuffer in) throws Exception {
         for (;;) {
             int size = in.size();
+            //已经全部写完
             if (size == 0) {
                 // All written so clear OP_WRITE
                 clearOpWrite();
@@ -266,21 +271,27 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
             boolean setOpWrite = false;
 
             // Ensure the pending writes are made of ByteBufs only.
+            //转化为nio buffer数组
             ByteBuffer[] nioBuffers = in.nioBuffers();
+            //数组的数量
             int nioBufferCnt = in.nioBufferCount();
+            //要写的总共字节数
             long expectedWrittenBytes = in.nioBufferSize();
             SocketChannel ch = javaChannel();
 
             // Always us nioBuffers() to workaround data-corruption.
             // See https://github.com/netty/netty/issues/2761
             switch (nioBufferCnt) {
+                //小于1个，调用父类AbstractNioByteChannel的doWrite方法写
                 case 0:
                     // We have something else beside ByteBuffers to write so fallback to normal writes.
                     super.doWrite(in);
                     return;
+                //只有1个时
                 case 1:
                     // Only one ByteBuf so use non-gathering write
                     ByteBuffer nioBuffer = nioBuffers[0];
+                    //获取自旋次数循环发送
                     for (int i = config().getWriteSpinCount() - 1; i >= 0; i --) {
                         final int localWrittenBytes = ch.write(nioBuffer);
                         if (localWrittenBytes == 0) {
@@ -289,6 +300,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                         }
                         expectedWrittenBytes -= localWrittenBytes;
                         writtenBytes += localWrittenBytes;
+                        //发送完成则设置标识位
                         if (expectedWrittenBytes == 0) {
                             done = true;
                             break;
@@ -296,7 +308,9 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                     }
                     break;
                 default:
+                    //多于1个数组则循环发送
                     for (int i = config().getWriteSpinCount() - 1; i >= 0; i --) {
+                        //使用SocketChannel的gather write
                         final long localWrittenBytes = ch.write(nioBuffers, 0, nioBufferCnt);
                         if (localWrittenBytes == 0) {
                             setOpWrite = true;
@@ -314,7 +328,7 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
             // Release the fully written buffers, and update the indexes of the partially written buffer.
             in.removeBytes(writtenBytes);
-
+            //如果没写完，调用父类的incompleteWrite方法
             if (!done) {
                 // Did not write all buffers completely.
                 incompleteWrite(setOpWrite);

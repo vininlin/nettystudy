@@ -57,14 +57,18 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
 
     @Override
     public ByteBuf retain() {
+        //自旋直到CAS操作成功
         for (;;) {
             int refCnt = this.refCnt;
+            //为0，抛出异常
             if (refCnt == 0) {
                 throw new IllegalReferenceCountException(0, 1);
             }
+            //达到最大值
             if (refCnt == Integer.MAX_VALUE) {
                 throw new IllegalReferenceCountException(Integer.MAX_VALUE, 1);
             }
+            //CAS更新计数
             if (refCntUpdater.compareAndSet(this, refCnt, refCnt + 1)) {
                 break;
             }
@@ -105,12 +109,13 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
 
     @Override
     public final boolean release() {
+        //自旋直到CAS操作成功
         for (;;) {
             int refCnt = this.refCnt;
             if (refCnt == 0) {
                 throw new IllegalReferenceCountException(0, -1);
             }
-
+            //CAS操作
             if (refCntUpdater.compareAndSet(this, refCnt, refCnt - 1)) {
                 if (refCnt == 1) {
                     deallocate();

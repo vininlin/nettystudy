@@ -181,24 +181,30 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         @Override
         public final void connect(
                 final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise promise) {
+            //判断Channel是否取消或未打开
             if (!promise.setUncancellable() || !ensureOpen(promise)) {
                 return;
             }
 
             try {
+                //如果已经异步连接，则抛出异常
                 if (connectPromise != null) {
                     throw new IllegalStateException("connection attempt already made");
                 }
-
+                //判断Channel是否激活
                 boolean wasActive = isActive();
+                //调用外部类AbstactNioChannel的doConnect方法
                 if (doConnect(remoteAddress, localAddress)) {
+                    //连接成功，设置成功的Promise结果,触发ChannelActive事件
                     fulfillConnectPromise(promise, wasActive);
                 } else {
                     connectPromise = promise;
                     requestedRemoteAddress = remoteAddress;
-
+                    
                     // Schedule connect timeout.
+                    //获取配置的连接超时时间
                     int connectTimeoutMillis = config().getConnectTimeoutMillis();
+                    //如果连接超时时间大于0，则执行计划任务
                     if (connectTimeoutMillis > 0) {
                         connectTimeoutFuture = eventLoop().schedule(new OneTimeTask() {
                             @Override
@@ -212,7 +218,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
                             }
                         }, connectTimeoutMillis, TimeUnit.MILLISECONDS);
                     }
-
+                    //promise添加监听，操作完成关闭Channel
                     promise.addListener(new ChannelFutureListener() {
                         @Override
                         public void operationComplete(ChannelFuture future) throws Exception {
@@ -272,8 +278,11 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             assert eventLoop().inEventLoop();
 
             try {
+                //判断Channel是否激活
                 boolean wasActive = isActive();
+                //调用外部的doFinishConnect方法
                 doFinishConnect();
+                //设置Promise结果
                 fulfillConnectPromise(connectPromise, wasActive);
             } catch (Throwable t) {
                 fulfillConnectPromise(connectPromise, annotateConnectException(t, requestedRemoteAddress));
@@ -318,17 +327,21 @@ public abstract class AbstractNioChannel extends AbstractChannel {
     @Override
     protected void doRegister() throws Exception {
         boolean selected = false;
+        //自旋
         for (;;) {
             try {
+                //使用JDK标准NIO进行注册到Selector上，并把自身作为附件对象注册，这里没有注册感兴趣的ops,
                 selectionKey = javaChannel().register(((NioEventLoop) eventLoop().unwrap()).selector, 0, this);
                 return;
             } catch (CancelledKeyException e) {
+                //如果key被取消，再selectNow一次，即更新SelectionKey
                 if (!selected) {
                     // Force the Selector to select now as the "canceled" SelectionKey may still be
                     // cached and not removed because no Select.select(..) operation was called yet.
                     ((NioEventLoop) eventLoop().unwrap()).selectNow();
                     selected = true;
                 } else {
+                    //如果强制select操作后，SelectionKey还被缓存，抛出异常
                     // We forced a select operation on the selector before but the SelectionKey is still cached
                     // for whatever reason. JDK bug ?
                     throw e;
@@ -350,13 +363,15 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         }
 
         final SelectionKey selectionKey = this.selectionKey;
+        //SelectionKey不合法，返回
         if (!selectionKey.isValid()) {
             return;
         }
 
         readPending = true;
-
+        //获取selectionKey感兴趣的操作
         final int interestOps = selectionKey.interestOps();
+        //如果没有设置interestOps，则设置readInterestOp
         if ((interestOps & readInterestOp) == 0) {
             selectionKey.interestOps(interestOps | readInterestOp);
         }

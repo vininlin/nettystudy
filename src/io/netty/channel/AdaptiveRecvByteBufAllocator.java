@@ -36,22 +36,25 @@ public class AdaptiveRecvByteBufAllocator implements RecvByteBufAllocator {
     static final int DEFAULT_MINIMUM = 64;
     static final int DEFAULT_INITIAL = 1024;
     static final int DEFAULT_MAXIMUM = 65536;
-
+    
+    //增加的步长 
     private static final int INDEX_INCREMENT = 4;
+    //减少的步长
     private static final int INDEX_DECREMENT = 1;
 
     private static final int[] SIZE_TABLE;
 
     static {
+        //以16为步长初始化一个整型数组
         List<Integer> sizeTable = new ArrayList<Integer>();
         for (int i = 16; i < 512; i += 16) {
             sizeTable.add(i);
         }
-
+        //以512的倍数添加
         for (int i = 512; i > 0; i <<= 1) {
             sizeTable.add(i);
         }
-
+        //初始化SIZE_TABLE数组
         SIZE_TABLE = new int[sizeTable.size()];
         for (int i = 0; i < SIZE_TABLE.length; i ++) {
             SIZE_TABLE[i] = sizeTable.get(i);
@@ -60,6 +63,7 @@ public class AdaptiveRecvByteBufAllocator implements RecvByteBufAllocator {
 
     public static final AdaptiveRecvByteBufAllocator DEFAULT = new AdaptiveRecvByteBufAllocator();
 
+    //采用二分查找法实现
     private static int getSizeTableIndex(final int size) {
         for (int low = 0, high = SIZE_TABLE.length - 1;;) {
             if (high < low) {
@@ -85,17 +89,23 @@ public class AdaptiveRecvByteBufAllocator implements RecvByteBufAllocator {
     }
 
     private static final class HandleImpl implements Handle {
+        //最小索引
         private final int minIndex;
+        //最大索引
         private final int maxIndex;
+        //当前索引
         private int index;
+        //下一条接收的缓冲区长度
         private int nextReceiveBufferSize;
+        //是否收缩
         private boolean decreaseNow;
 
         HandleImpl(int minIndex, int maxIndex, int initial) {
             this.minIndex = minIndex;
             this.maxIndex = maxIndex;
-
+            //获取SIZE_TABLE索引，默认initial=1024时，index=32
             index = getSizeTableIndex(initial);
+            //此时，nextReceiveBufferSize=1024
             nextReceiveBufferSize = SIZE_TABLE[index];
         }
 
@@ -111,6 +121,10 @@ public class AdaptiveRecvByteBufAllocator implements RecvByteBufAllocator {
 
         @Override
         public void record(int actualReadBytes) {
+            //如果真实读取的字节长度小于等于目前SIZE_TABLE中index对应的容量长度，
+            //则收缩或准备收缩
+            //默认构造方法时，index - INDEX_DECREMENT - 1 = 30
+            //SIZE_TABLE[30]=496
             if (actualReadBytes <= SIZE_TABLE[Math.max(0, index - INDEX_DECREMENT - 1)]) {
                 if (decreaseNow) {
                     index = Math.max(index - INDEX_DECREMENT, minIndex);
@@ -120,7 +134,10 @@ public class AdaptiveRecvByteBufAllocator implements RecvByteBufAllocator {
                     decreaseNow = true;
                 }
             } else if (actualReadBytes >= nextReceiveBufferSize) {
+                //读取的长度大于nextReceiveBufferSize时，以4个索引长度获取下一个SIZE_TABLE数组索引
+                //如果默认构造方法，index = 32+4=36
                 index = Math.min(index + INDEX_INCREMENT, maxIndex);
+                //nextReceiveBufferSize=16384
                 nextReceiveBufferSize = SIZE_TABLE[index];
                 decreaseNow = false;
             }

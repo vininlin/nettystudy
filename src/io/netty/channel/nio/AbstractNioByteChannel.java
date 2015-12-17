@@ -17,6 +17,7 @@ package io.netty.channel.nio;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelOption;
@@ -91,16 +92,23 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
         @Override
         public final void read() {
+            //获取Channel配置
             final ChannelConfig config = config();
+            //如果非自动读则删除OP_READ标识位
             if (!config.isAutoRead() && !isReadPending()) {
                 // ChannelConfig.setAutoRead(false) was called in the meantime
                 removeReadOp();
                 return;
             }
-
+            //获取ChannelPipeline、
             final ChannelPipeline pipeline = pipeline();
+            //ByteBufAllocator,默认的是ByteBufUtil.DEFAULT_ALLOCATOR,
+            //即 PooledByteBufAllocator.DEFAULT
             final ByteBufAllocator allocator = config.getAllocator();
+            //获取配置中每次最大的读取消息长度
             final int maxMessagesPerRead = config.getMaxMessagesPerRead();
+            //AdaptiveRecvByteBufAllocator.newHandle();
+            //缓冲区大小动态调整
             RecvByteBufAllocator.Handle allocHandle = recvBufAllocHandle();
 
             ByteBuf byteBuf = null;
@@ -109,10 +117,15 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             try {
                 int totalReadAmount = 0;
                 boolean readPendingReset = false;
+                //当读取的消息小于取配置中每次最大的读取消息长度时，循环。
                 do {
+                    //动态分配缓冲区
                     byteBuf = allocHandle.allocate(allocator);
+                    //获取缓冲区可写字节数
                     int writable = byteBuf.writableBytes();
+                    //调用外部类的doReadBytes读入缓冲区
                     int localReadAmount = doReadBytes(byteBuf);
+                    //没有可读字节，释放
                     if (localReadAmount <= 0) {
                         // not was read release the buffer
                         byteBuf.release();
@@ -124,6 +137,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                         readPendingReset = true;
                         setReadPending(false);
                     }
+                    //ChannelPipeline触发ChannelRead事件
                     pipeline.fireChannelRead(byteBuf);
                     byteBuf = null;
 
@@ -146,8 +160,10 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                         break;
                     }
                 } while (++ messages < maxMessagesPerRead);
-
+              //ChannelPipeline触发ChannelReadComplete事件
                 pipeline.fireChannelReadComplete();
+                //动态缓冲区分配器记录本次读取的总字节数
+                //目的是为了下一次读取动态调整
                 allocHandle.record(totalReadAmount);
 
                 if (close) {
@@ -172,46 +188,55 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
     @Override
     protected void doWrite(ChannelOutboundBuffer in) throws Exception {
+        //自旋次数设置为-1
         int writeSpinCount = -1;
-
+        //自旋
         for (;;) {
             Object msg = in.current();
+            //说明已经写完，清理op标志位，跳出循环
             if (msg == null) {
                 // Wrote all messages.
                 clearOpWrite();
                 break;
             }
-
+            //如果是ByteBuf实例
             if (msg instanceof ByteBuf) {
                 ByteBuf buf = (ByteBuf) msg;
                 int readableBytes = buf.readableBytes();
+                //可读字节为0，删除该消息，继续循环
                 if (readableBytes == 0) {
                     in.remove();
                     continue;
                 }
-
+                //
                 boolean setOpWrite = false;
                 boolean done = false;
                 long flushedAmount = 0;
+                //从配置中读取自旋次数
                 if (writeSpinCount == -1) {
                     writeSpinCount = config().getWriteSpinCount();
                 }
+                //根据writeSpinCount循环写，
+                //设置writeSpinCount的原因是为了I/O线程不会一直被写操作占用
                 for (int i = writeSpinCount - 1; i >= 0; i --) {
+                    //doWriteBytes由子类实现
                     int localFlushedAmount = doWriteBytes(buf);
+                    //如果localFlushedAmount为0，说明写完，跳出。
                     if (localFlushedAmount == 0) {
                         setOpWrite = true;
                         break;
                     }
 
                     flushedAmount += localFlushedAmount;
+                    //buf已经没有可读字节，完成，跳出
                     if (!buf.isReadable()) {
                         done = true;
                         break;
                     }
                 }
-
+                //设置写的进度
                 in.progress(flushedAmount);
-
+                //完成则删除该消息，否则设置未写完标志位,异步线程继续写。。
                 if (done) {
                     in.remove();
                 } else {
@@ -219,10 +244,11 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
                     break;
                 }
             } else if (msg instanceof FileRegion) {
+                //如果是文件块实现
                 FileRegion region = (FileRegion) msg;
                 boolean done = region.transfered() >= region.count();
                 boolean setOpWrite = false;
-
+                //没处理完，实现与ByteBuf实例基本一致。
                 if (!done) {
                     long flushedAmount = 0;
                     if (writeSpinCount == -1) {

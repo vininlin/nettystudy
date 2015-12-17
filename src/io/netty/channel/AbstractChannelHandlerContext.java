@@ -38,7 +38,10 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     // This class keeps an integer member field 'skipFlags' whose each bit tells if the corresponding handler method
     // is annotated with @Skip. 'skipFlags' is retrieved in runtime via the reflection API and is cached.
     // The following constants signify which bit of 'skipFlags' corresponds to which handler method:
-
+    
+    //Context中有一个integer域skipFlags的位数来表示对应的handler方法
+    //handler的方法上有@Skip注解的，会在运行时通过反射API得到并缓存
+    //以下的常量分别对应一个handler方法
     static final int MASK_HANDLER_ADDED = 1;
     static final int MASK_HANDLER_REMOVED = 1 << 1;
 
@@ -61,6 +64,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     private static final int MASK_WRITE = 1 << 17;
     private static final int MASK_FLUSH = 1 << 18;
 
+    //代表inbound类handler方法
     private static final int MASKGROUP_INBOUND = MASK_EXCEPTION_CAUGHT |
             MASK_CHANNEL_REGISTERED |
             MASK_CHANNEL_UNREGISTERED |
@@ -70,7 +74,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             MASK_CHANNEL_READ_COMPLETE |
             MASK_CHANNEL_WRITABILITY_CHANGED |
             MASK_USER_EVENT_TRIGGERED;
-
+    //代表outbound类handler方法。
     private static final int MASKGROUP_OUTBOUND = MASK_BIND |
             MASK_CONNECT |
             MASK_DISCONNECT |
@@ -110,14 +114,18 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
      * It gets the value from {@link #skipFlagsCache} if an handler of the same type were queried before.
      * Otherwise, it delegates to {@link #skipFlags0(Class)} to get it.
      */
+    //计算一个Handler类的Skip方法代表的位数值
     static int skipFlags(ChannelHandler handler) {
+        //从ThreadLocal变量中获取
         WeakHashMap<Class<?>, Integer> cache = skipFlagsCache.get();
         Class<? extends ChannelHandler> handlerType = handler.getClass();
         int flagsVal;
         Integer flags = cache.get(handlerType);
+        //缓存已经存在，直接返回
         if (flags != null) {
             flagsVal = flags;
         } else {
+            //调用skipFlags0方法计算后，设置到缓存中
             flagsVal = skipFlags0(handlerType);
             cache.put(handlerType, Integer.valueOf(flagsVal));
         }
@@ -206,7 +214,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
         return handlerType.getMethod(methodName, newParamTypes).isAnnotationPresent(Skip.class);
     }
-
+    //Context组成链表结构
     volatile AbstractChannelHandlerContext next;
     volatile AbstractChannelHandlerContext prev;
 
@@ -586,19 +594,24 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     public ChannelFuture newFailedFuture(Throwable cause) {
         return new FailedChannelFuture(channel(), executor(), cause);
     }
-
+    
+    //查找下一个inbound的ChannelHandlerContext
     private AbstractChannelHandlerContext findContextInbound() {
         AbstractChannelHandlerContext ctx = this;
         do {
+            //先获取下一个ChannelHandlerContext
             ctx = ctx.next;
+            //如果下一个ChannelHandlerContext全部略过inbound方法，则继续寻找下一个ChannelHandlerContext
         } while ((ctx.skipFlags & MASKGROUP_INBOUND) == MASKGROUP_INBOUND);
         return ctx;
     }
-
+    //查找上一个outbound的ChannelHandlerContext
     private AbstractChannelHandlerContext findContextOutbound() {
         AbstractChannelHandlerContext ctx = this;
         do {
+          //先获取上一个ChannelHandlerContext
             ctx = ctx.prev;
+            //如果上一个ChannelHandlerContext全部略过outbound方法，则继续寻找上一个ChannelHandlerContext  
         } while ((ctx.skipFlags & MASKGROUP_OUTBOUND) == MASKGROUP_OUTBOUND);
         return ctx;
     }
