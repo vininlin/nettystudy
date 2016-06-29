@@ -330,11 +330,13 @@ public abstract class AbstractNioChannel extends AbstractChannel {
         //自旋
         for (;;) {
             try {
+                System.out.println("AbstractNioChannel doRegister");
                 //使用JDK标准NIO进行注册到Selector上，并把自身作为附件对象注册，这里没有注册感兴趣的ops,
                 selectionKey = javaChannel().register(((NioEventLoop) eventLoop().unwrap()).selector, 0, this);
                 return;
             } catch (CancelledKeyException e) {
                 //如果key被取消，再selectNow一次，即更新SelectionKey
+                System.out.println("AbstractNioChannel doRegister,CancelledKeyException");
                 if (!selected) {
                     // Force the Selector to select now as the "canceled" SelectionKey may still be
                     // cached and not removed because no Select.select(..) operation was called yet.

@@ -78,20 +78,25 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
         }
 
         if (executor == null) {
+            //executor默认使用ForkJoinPool
             executor = newDefaultExecutorService(nEventExecutors);
             shutdownExecutor = true;
         }
-
+        //创建children数组,nEventExecutors默认为处理器的个数*2
         children = new EventExecutor[nEventExecutors];
+        //数组长度是否为1或2的n次方
+        //两个chooser不同处理是为了数组下标在合法范围内
         if (isPowerOfTwo(children.length)) {
             chooser = new PowerOfTwoEventExecutorChooser();
         } else {
             chooser = new GenericEventExecutorChooser();
         }
-
+        System.out.println("MultithreadEventExecutorGroup init NioEventLoop count="+nEventExecutors);
+        //实例化数组
         for (int i = 0; i < nEventExecutors; i ++) {
             boolean success = false;
             try {
+                //newChild由子类实现，即NioEventLoop
                 children[i] = newChild(executor, args);
                 success = true;
             } catch (Exception e) {
@@ -118,7 +123,7 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
                 }
             }
         }
-
+        //默认为false
         final boolean shutdownExecutor0 = shutdownExecutor;
         final Executor executor0 = executor;
         final FutureListener<Object> terminationListener = new FutureListener<Object>() {
@@ -134,13 +139,13 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
                 }
             }
         };
-
+        //添加关闭监听
         for (EventExecutor e: children) {
             e.terminationFuture().addListener(terminationListener);
         }
-
         Set<EventExecutor> childrenSet = new LinkedHashSet<EventExecutor>(children.length);
         Collections.addAll(childrenSet, children);
+        //转化为不可修改的set
         readonlyChildren = Collections.unmodifiableSet(childrenSet);
     }
 

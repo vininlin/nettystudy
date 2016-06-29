@@ -101,6 +101,8 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     private final Runnable asRunnable = new Runnable() {
         @Override
         public void run() {
+            //AtomicReferenceFieldUpdater更新thread变量为当前线程
+            System.out.println("SingleThreadEventExecutor asRunnable updateThread to " + Thread.currentThread().getName());
             updateThread(Thread.currentThread());
 
             // lastExecutionTime must be set on the first run
@@ -113,6 +115,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             }
 
             try {
+                //NioEventLoop.run()
                 SingleThreadEventExecutor.this.run();
             } catch (Throwable t) {
                 logger.warn("Unexpected exception from an event executor: ", t);
@@ -159,6 +162,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             if (task == WAKEUP_TASK) {
                 continue;
             }
+            System.out.println("SingleThreadEventExecutor pollTask,task class ="+task.getClass().getName());
             return task;
         }
     }
@@ -221,6 +225,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     private void fetchFromScheduledTaskQueue() {
         if (hasScheduledTasks()) {
+            System.out.println("SingleThreadEventExecutor fetchFromScheduledTaskQueue..");
             long nanoTime = AbstractScheduledEventExecutor.nanoTime();
             for (;;) {
                 Runnable scheduledTask = pollScheduledTask(nanoTime);
@@ -269,6 +274,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         if (isShutdown()) {
             reject();
         }
+        System.out.println("SingleThreadEventExecutor add task,task class="+task.getClass().getName()+",thread="+Thread.currentThread().getName());
         taskQueue.add(task);
     }
 
@@ -314,33 +320,38 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
      * the tasks in the task queue and returns if it ran longer than {@code timeoutNanos}.
      */
     protected boolean runAllTasks(long timeoutNanos) {
+        System.out.println("NioEventLoop runAllTasks...");
+        //从AbstractScheduledEventExecutor的优先级队列中获取计划任务到taskQueue中。
         fetchFromScheduledTaskQueue();
+        //从taskQueue中获取任务
         Runnable task = pollTask();
         if (task == null) {
             return false;
         }
-
+        //计算超时时间
         final long deadline = ScheduledFutureTask.nanoTime() + timeoutNanos;
         long runTasks = 0;
         long lastExecutionTime;
         for (;;) {
             try {
+                //执行task的run
+                System.out.println("SingleThreadEventExecutor runAllTasks,task.run,task class = " + task.getClass().getName());
                 task.run();
             } catch (Throwable t) {
                 logger.warn("A task raised an exception.", t);
             }
-
+            
             runTasks ++;
-
             // Check timeout every 64 tasks because nanoTime() is relatively expensive.
             // XXX: Hard-coded value - will make it configurable if it is really a problem.
+            //每64次检查超时时间，因为nanoTime()很耗性能
             if ((runTasks & 0x3F) == 0) {
                 lastExecutionTime = ScheduledFutureTask.nanoTime();
                 if (lastExecutionTime >= deadline) {
                     break;
                 }
             }
-
+            //继续获取任务
             task = pollTask();
             if (task == null) {
                 lastExecutionTime = ScheduledFutureTask.nanoTime();
@@ -395,6 +406,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     @Override
     public boolean inEventLoop(Thread thread) {
+        //当前线程是与thread相等
         return thread == this.thread;
     }
 
@@ -647,6 +659,8 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         return isTerminated();
     }
 
+    //如果是server端，被bind事件触发
+    //AbstractBootstrap.doBind0()
     @Override
     public void execute(Runnable task) {
         if (task == null) {
@@ -654,9 +668,14 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         }
 
         boolean inEventLoop = inEventLoop();
+        //判断当前提交任务的线程是否为eventloop线程
+        System.out.println(" SingleThreadEventExecutor execute..,inEventLoop="+inEventLoop+",class="+this.getClass().getName()+",thread="+Thread.currentThread().getName());
         if (inEventLoop) {
+            //添加任务
             addTask(task);
         } else {
+            //开始执行
+            System.out.println(" not in eventloop, add task and execute.");
             startExecution();
             addTask(task);
             if (isShutdown() && removeTask(task)) {
@@ -723,19 +742,28 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         }
     }
 
+    //开始执行
     private void startExecution() {
+        //判断执行状态为未执行
         if (STATE_UPDATER.get(this) == ST_NOT_STARTED) {
+            //更新为执行状态
             if (STATE_UPDATER.compareAndSet(this, ST_NOT_STARTED, ST_STARTED)) {
+                //执行ScheduledFutureTask定时任务
+                System.out.println(" SingleThreadEventExecutor startExecution..,class="+this.getClass().getName()+",thread="+Thread.currentThread().getName());
                 schedule(new ScheduledFutureTask<Void>(
                         this, Executors.<Void>callable(new PurgeTask(), null),
                         ScheduledFutureTask.deadlineNanos(SCHEDULE_PURGE_INTERVAL), -SCHEDULE_PURGE_INTERVAL));
+                //开始执行
                 scheduleExecution();
             }
         }
     }
 
     protected final void scheduleExecution() {
+        //把thread变量置为null
         updateThread(null);
+        System.out.println("SingleThreadEventExecutor scheduleExecution updateThread null success,current thread="+Thread.currentThread().getName());
+        //执行
         executor.execute(asRunnable);
     }
 

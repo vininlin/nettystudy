@@ -61,7 +61,7 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
         if (promise == null) {
             throw new NullPointerException("promise");
         }
-
+        System.out.println(" SingleThreadEventLoop register..,,thread="+Thread.currentThread().getName());
         channel.unsafe().register(this, promise);
         return promise;
     }

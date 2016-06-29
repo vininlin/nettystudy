@@ -48,6 +48,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
         if (scheduledTaskQueue == null) {
             scheduledTaskQueue = new PriorityQueue<ScheduledFutureTask<?>>();
         }
+        System.out.println("AbstractScheduledEventExecutor new scheduledTaskQueue,class="+this.getClass().getName()+",thread="+Thread.currentThread().getName());
         return scheduledTaskQueue;
     }
 
@@ -90,7 +91,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
      */
     protected final Runnable pollScheduledTask(long nanoTime) {
         assert inEventLoop();
-
+        System.out.println("AbstractScheduledEventExecutor pollScheduledTask..");
         Queue<ScheduledFutureTask<?>> scheduledTaskQueue = this.scheduledTaskQueue;
         ScheduledFutureTask<?> scheduledTask = scheduledTaskQueue == null ? null : scheduledTaskQueue.peek();
         if (scheduledTask == null) {
@@ -195,11 +196,16 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
 
     <V> ScheduledFuture<V> schedule(final ScheduledFutureTask<V> task) {
         if (inEventLoop()) {
+            System.out.println(" AbstractScheduledEventExecutor execute..,,thread="+Thread.currentThread().getName()+",add to scheduledTaskQueue");
             scheduledTaskQueue().add(task);
         } else {
+            System.out.println(" AbstractScheduledEventExecutor execute..,inEventLoop="+inEventLoop()+
+                    ",thread="+Thread.currentThread().getName()+",schedule execute");
             execute(new Runnable() {
                 @Override
                 public void run() {
+                    System.out.println(" AbstractScheduledEventExecutor task run ..,class="+this.getClass().getName()+
+                            ",thread="+Thread.currentThread().getName()+",schedule execute,add to scheduledTaskQueue");
                     scheduledTaskQueue().add(task);
                 }
             });

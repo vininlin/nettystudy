@@ -114,6 +114,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         if (selectorProvider == null) {
             throw new NullPointerException("selectorProvider");
         }
+        //SelectorProvider.provider
         provider = selectorProvider;
         selector = openSelector();
     }
@@ -301,15 +302,22 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         logger.info("Migrated " + nChannels + " channel(s) to the new Selector.");
     }
 
+    /**
+     * 实现SingleThreadEventExecutor中定义的run方法,
+     * 被SingleThreadEventExecutor中的asRunnable成员变量初始化时执行
+     */
     @Override
     protected void run() {
         //把wakenUp还原为false，并将之前的wakenUp状态保存在oldWakenUp变量中
         boolean oldWakenUp = wakenUp.getAndSet(false);
+        System.out.println("NioEventLoop run select~~~~");
         try {
             //如果队列中有任务，马上执行select操作
             if (hasTasks()) {
+                System.out.println("NioEventLoop run selectNow~~~~");
                 selectNow();
             } else {
+                System.out.println("NioEventLoop run select(oldWakenUp)~~~~");
                 select(oldWakenUp);
 
                 // 'wakenUp.compareAndSet(false, true)' is always evaluated
@@ -348,6 +356,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             cancelledKeys = 0;
             needsToSelectAgain = false;
             final int ioRatio = this.ioRatio;
+            //io占比100%
             if (ioRatio == 100) {
                 processSelectedKeys();
                 runAllTasks();
@@ -355,8 +364,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 final long ioStartTime = System.nanoTime();
 
                 processSelectedKeys();
-
+                //处理IO的耗时
                 final long ioTime = System.nanoTime() - ioStartTime;
+                //任务处理时间占比*ioTime=处理任务的时间
                 runAllTasks(ioTime * (100 - ioRatio) / ioRatio);
             }
 
@@ -382,7 +392,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 // Ignore.
             }
         }
-
+        //再次调用SingleThreadEventExecutor的scheduleExecution，loop这个run方法。
         scheduleExecution();
     }
 
@@ -427,19 +437,22 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         // check if the set is empty and if so just return to not create garbage by
         // creating a new Iterator every time even if there is nothing to process.
         // See https://github.com/netty/netty/issues/597
+        System.out.println("NioEventLoop processSelectedKeysPlain ,selectedKeys.isEmpty="+selectedKeys.isEmpty());
         if (selectedKeys.isEmpty()) {
             return;
         }
 
         Iterator<SelectionKey> i = selectedKeys.iterator();
+        //循环处理
         for (;;) {
             final SelectionKey k = i.next();
             final Object a = k.attachment();
             i.remove();
-
+            //如果key的attachment是AbstractNioChannel
             if (a instanceof AbstractNioChannel) {
                 processSelectedKey(k, (AbstractNioChannel) a);
             } else {
+                //其它channel
                 @SuppressWarnings("unchecked")
                 NioTask<SelectableChannel> task = (NioTask<SelectableChannel>) a;
                 processSelectedKey(k, task);
@@ -465,6 +478,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
 
     private void processSelectedKeysOptimized(SelectionKey[] selectedKeys) {
         //循环处理有优化的keySet
+        System.out.println("NioEventLoop processSelectedKeysOptimized ,selectedKeys.length="+selectedKeys.length);
         for (int i = 0;; i ++) {
             final SelectionKey k = selectedKeys[i];
             //只要有k为null,就跳出循环
@@ -627,6 +641,11 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
     }
 
+    /**
+     * 执行select
+     * @param oldWakenUp
+     * @throws IOException
+     */
     private void select(boolean oldWakenUp) throws IOException {
         Selector selector = this.selector;
         try {
@@ -681,7 +700,6 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 long time = System.nanoTime();
                 if (time - TimeUnit.MILLISECONDS.toNanos(timeoutMillis) >= currentTimeNanos) {
                     // timeoutMillis elapsed without anything selected.
-                    //没有selected,空循环，计数
                     selectCnt = 1;
                 } else if (SELECTOR_AUTO_REBUILD_THRESHOLD > 0 &&
                         selectCnt >= SELECTOR_AUTO_REBUILD_THRESHOLD) {

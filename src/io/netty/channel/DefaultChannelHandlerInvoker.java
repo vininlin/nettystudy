@@ -205,14 +205,16 @@ public class DefaultChannelHandlerInvoker implements ChannelHandlerInvoker {
         if (localAddress == null) {
             throw new NullPointerException("localAddress");
         }
+        //检查promise是否合法
         if (!validatePromise(ctx, promise, false)) {
             // promise cancelled
             return;
         }
-
+        //如果executor是否为事件循环线程 
         if (executor.inEventLoop()) {
             invokeBindNow(ctx, localAddress, promise);
         } else {
+            //异步调用
             safeExecuteOutbound(new OneTimeTask() {
                 @Override
                 public void run() {

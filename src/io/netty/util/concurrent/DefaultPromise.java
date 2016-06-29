@@ -52,6 +52,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * One or more listeners. Can be a {@link GenericFutureListener} or a {@link DefaultFutureListeners}.
      * If {@code null}, it means either 1) no listeners were added yet or 2) all listeners were notified.
      */
+    //多个监听器，如果为null,说明1)还没有监听器添加；2)所以的监听器已经被通知
     private Object listeners;
 
     /**
@@ -61,6 +62,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      */
     private LateListeners lateListeners;
 
+    //等待的数量
     private short waiters;
 
     /**
@@ -93,11 +95,13 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     }
 
     private static boolean isCancelled0(Object result) {
+        //判断是否已经取消
         return result instanceof CauseHolder && ((CauseHolder) result).cause instanceof CancellationException;
     }
 
     @Override
     public boolean isCancellable() {
+        //是否可取消，在结果为null时，是可取消的
         return result == null;
     }
 
@@ -107,6 +111,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     }
 
     private static boolean isDone0(Object result) {
+        //判断操作是否完成，结果未空且不是取消
         return result != null && result != UNCANCELLABLE;
     }
 
@@ -116,6 +121,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         if (result == null || result == UNCANCELLABLE) {
             return false;
         }
+        //如果操作没有异常，就认为是成功状态
         return !(result instanceof CauseHolder);
     }
 
@@ -133,20 +139,22 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         if (listener == null) {
             throw new NullPointerException("listener");
         }
-
+        //如果已经完成，则通知监听器，延迟
         if (isDone()) {
             notifyLateListener(listener);
             return this;
         }
-
+        //同步，因为listners是个数组
         synchronized (this) {
             if (!isDone()) {
                 if (listeners == null) {
                     listeners = listener;
                 } else {
+                    //DefaultFutureListeners实例
                     if (listeners instanceof DefaultFutureListeners) {
                         ((DefaultFutureListeners) listeners).add(listener);
                     } else {
+                        //
                         final GenericFutureListener<? extends Future<V>> firstListener =
                                 (GenericFutureListener<? extends Future<V>>) listeners;
                         listeners = new DefaultFutureListeners(firstListener, listener);
@@ -155,7 +163,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
                 return this;
             }
         }
-
+        //通知监听器
         notifyLateListener(listener);
         return this;
     }
@@ -238,21 +246,28 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public Promise<V> await() throws InterruptedException {
+        //已经设置，返回promise对象
         if (isDone()) {
             return this;
         }
-
+        //线程被中断，抛出中断异常
         if (Thread.interrupted()) {
             throw new InterruptedException(toString());
         }
-
+        //同步
         synchronized (this) {
+            //循环直到结果被设置
+            //循环判断是防止线程意外被唤醒导致功能异常
             while (!isDone()) {
+                //死锁检查，自己等待自己的情况
                 checkDeadLock();
+                //增加等待线程
                 incWaiters();
                 try {
+                    //Object wait
                     wait();
                 } finally {
+                    //减少等待线程
                     decWaiters();
                 }
             }
@@ -393,6 +408,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public Promise<V> setSuccess(V result) {
+        //设置成功并通知
         if (setSuccess0(result)) {
             notifyListeners();
             return this;
@@ -497,17 +513,21 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         if (isDone()) {
             return false;
         }
-
+        //可能存在用户线程和IO线程操作，加锁
         synchronized (this) {
             // Allow only once.
+            //进行2次判断，提高性能
             if (isDone()) {
                 return false;
             }
+            //如果结果为null，设置为默认的SUCCESS
+            //仅需要通知等待的线程
             if (result == null) {
                 this.result = SUCCESS;
             } else {
                 this.result = result;
             }
+            //如果有等待的waiters即await产生，则全部通知
             if (hasWaiters()) {
                 notifyAll();
             }
@@ -677,6 +697,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     @SuppressWarnings({ "unchecked", "rawtypes" })
     static void notifyListener0(Future future, GenericFutureListener l) {
         try {
+            //回调operationComplete方法。
             l.operationComplete(future);
         } catch (Throwable t) {
             if (logger.isWarnEnabled()) {

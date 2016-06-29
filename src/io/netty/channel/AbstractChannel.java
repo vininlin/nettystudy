@@ -486,14 +486,18 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 AbstractChannel.this.eventLoop.unwrapped = eventLoop;
             }
             //是否为同一eventLoop线程，如果是则调用register0方法注册
+            System.out.println(" AbstractChannel register..,inEventLoop="+eventLoop.inEventLoop()+",thread="+Thread.currentThread().getName());
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
-                //非同一eventLoop执行一次性任务注册
+                //外部线程则执行一次性任务注册
                 try {
+                    //NioEventLoop父类SingleThreadEventExecutor来执行
+                    System.out.println("not eventloop thread,as task to eventloop thread execute.");
                     eventLoop.execute(new OneTimeTask() {
                         @Override
                         public void run() {
+                            System.out.println(" thread AbstractChannel register0,thread="+Thread.currentThread().getName());
                             register0(promise);
                         }
                     });

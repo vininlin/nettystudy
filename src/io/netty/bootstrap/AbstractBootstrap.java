@@ -277,14 +277,16 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     }
 
     private ChannelFuture doBind(final SocketAddress localAddress) {
+        //初始化并注册Channel
+        System.out.println("doBind..");
         final ChannelFuture regFuture = initAndRegister();
         final Channel channel = regFuture.channel();
         if (regFuture.cause() != null) {
             return regFuture;
         }
-
         if (regFuture.isDone()) {
             // At this point we know that the registration was complete and successful.
+            //Channel完成注册
             ChannelPromise promise = channel.newPromise();
             doBind0(regFuture, channel, localAddress, promise);
             return promise;
@@ -312,16 +314,20 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     }
 
     final ChannelFuture initAndRegister() {
+        //ReflectiveChannelFactory创建socketchannel实例
         final Channel channel = channelFactory().newChannel();
         try {
+            //初始化channel,调用ServerBootstrap的init
             init(channel);
         } catch (Throwable t) {
             channel.unsafe().closeForcibly();
             // as the Channel is not registered yet we need to force the usage of the GlobalEventExecutor
             return new DefaultChannelPromise(channel, GlobalEventExecutor.INSTANCE).setFailure(t);
         }
-
+        //MultithreadEventLoopGroup.register(channel)
+        System.out.println(" boss channel register..");
         ChannelFuture regFuture = group().register(channel);
+        //发生了异常，关闭channel
         if (regFuture.cause() != null) {
             if (channel.isRegistered()) {
                 channel.close();
@@ -354,8 +360,10 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
             @Override
             public void run() {
                 if (regFuture.isSuccess()) {
+                    //注册成功继续bind，并设置监听器为CLOSE_ON_FAILURE
                     channel.bind(localAddress, promise).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
                 } else {
+                    //设置异步失败结果
                     promise.setFailure(regFuture.cause());
                 }
             }
